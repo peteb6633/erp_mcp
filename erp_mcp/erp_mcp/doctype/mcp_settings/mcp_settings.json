@@ -1,0 +1,130 @@
+{
+ "actions": [],
+ "creation": "2026-09-29 14:30:00.000000",
+ "description": "Controls what MCP clients such as Claude may do on this site. Role permissions still apply on top of these settings.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "endpoint",
+  "section_actions",
+  "allow_writes",
+  "allow_submit",
+  "column_break_actions",
+  "allow_cancel",
+  "allow_delete",
+  "section_limits",
+  "max_rows",
+  "log_arguments",
+  "column_break_limits",
+  "blocked_doctypes"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "description": "Untick to refuse all MCP requests.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "description": "Paste this URL into the MCP client (for Claude: Settings, Connectors, Add custom connector).",
+   "fieldname": "endpoint",
+   "fieldtype": "Data",
+   "label": "MCP Endpoint URL",
+   "read_only": 1,
+   "is_virtual": 1
+  },
+  {
+   "fieldname": "section_actions",
+   "fieldtype": "Section Break",
+   "label": "Allowed Actions"
+  },
+  {
+   "default": "1",
+   "description": "Offer the create_document and update_document tools.",
+   "fieldname": "allow_writes",
+   "fieldtype": "Check",
+   "label": "Allow Create and Update"
+  },
+  {
+   "default": "1",
+   "description": "Offer submit_document. Submitting posts accounting and stock documents to the ledger.",
+   "fieldname": "allow_submit",
+   "fieldtype": "Check",
+   "label": "Allow Submit"
+  },
+  {
+   "fieldname": "column_break_actions",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Offer cancel_document.",
+   "fieldname": "allow_cancel",
+   "fieldtype": "Check",
+   "label": "Allow Cancel"
+  },
+  {
+   "default": "0",
+   "description": "Offer delete_document. Deletion cannot be undone.",
+   "fieldname": "allow_delete",
+   "fieldtype": "Check",
+   "label": "Allow Delete"
+  },
+  {
+   "fieldname": "section_limits",
+   "fieldtype": "Section Break",
+   "label": "Limits and Logging"
+  },
+  {
+   "default": "100",
+   "description": "Most rows any list, search or report call may return.",
+   "fieldname": "max_rows",
+   "fieldtype": "Int",
+   "label": "Maximum Rows per Call",
+   "non_negative": 1
+  },
+  {
+   "default": "1",
+   "description": "Store each tool call's arguments in the MCP Audit Log.",
+   "fieldname": "log_arguments",
+   "fieldtype": "Check",
+   "label": "Log Arguments"
+  },
+  {
+   "fieldname": "column_break_limits",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "User\nRole\nHas Role\nDocPerm\nCustom DocPerm\nUser Permission\nServer Script\nClient Script\nSystem Console\nScheduled Job Type\nWebhook\nEmail Account\nSocial Login Key\nConnected App\nToken Cache\nLDAP Settings\nSystem Settings\nIntegration Request\nAccess Log",
+   "description": "One DocType per line. MCP clients cannot read or change these, even as an administrator. OAuth records and MCP Settings are always blocked.",
+   "fieldname": "blocked_doctypes",
+   "fieldtype": "Small Text",
+   "label": "Blocked DocTypes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-29 14:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERP MCP",
+ "name": "MCP Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

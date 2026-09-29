@@ -1,0 +1,35 @@
+[project]
+name = "erp_mcp"
+authors = [
+    { name = "Node4", email = "pbright@aramoko.com"}
+]
+description = "Connects MCP clients such as Claude to ERPNext, acting as the signed-in user."
+requires-python = ">=3.14"
+readme = "README.md"
+license = "MIT"
+dynamic = ["version"]
+dependencies = [
+    # "frappe~=16.0.0" # Installed and managed by bench.
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.frappe-dependencies]
+frappe = ">=16.0.0,<17.0.0"
+
+[deploy.dependencies.apt]
+packages = []
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = ["E501", "W191", "E101", "RUF012", "RUF022"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"

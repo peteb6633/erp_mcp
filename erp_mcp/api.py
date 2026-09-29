@@ -4,9 +4,9 @@ URL: ``https://<site>/api/method/erp_mcp.api.mcp``
 
 Clients authenticate with an ``Authorization`` header: an OAuth bearer token
 issued by the site's own OAuth provider (what Claude's custom connectors use),
-or a Frappe API key (``token <key>:<secret>``) for scripts and testing. Browser
-session cookies are refused, so a web page cannot drive this endpoint on a
-logged-in user's behalf.
+or a Frappe API key (``token <key>:<secret>``) for scripts and testing. Requests
+that carry a browser session cookie are refused, so a web page cannot drive
+this endpoint on a logged-in user's behalf.
 """
 
 from __future__ import annotations
@@ -50,12 +50,25 @@ def mcp():
 		# Stateless server: no SSE stream to open and no session to end.
 		return Response(status=405, headers={"Allow": "POST"})
 
-	if not frappe.get_request_header("Authorization") or frappe.session.user in (None, "", "Guest"):
+	# Only header auth counts. When Frappe authenticates a request from its
+	# Authorization header it sets the session ID to the user's name; a browser
+	# session (sid cookie or ?sid=) keeps a random ID. Refuse the latter, since a
+	# failed header check would otherwise fall back to the browser session.
+	from_browser_session = frappe.session.sid != frappe.session.user
+	if (
+		from_browser_session
+		or not frappe.get_request_header("Authorization")
+		or frappe.session.user in (None, "", "Guest")
+	):
 		return _unauthorised()
 
 	settings = guard.get_settings()
 	if not settings.enabled:
 		return _json(503, {"error": "MCP access is turned off in MCP Settings on this site."})
+
+	frappe.local.erp_mcp_client = _oauth_client()
+	if _is_bearer() and not guard.allowed_client(settings, frappe.local.erp_mcp_client):
+		return _json(403, {"error": "This OAuth client is not allowed to use MCP on this site."})
 
 	server = Server(
 		name="erp-mcp",
@@ -74,34 +87,37 @@ def mcp():
 
 
 def _invoke(tool: Tool, args: dict, settings: frappe._dict) -> Any:
-	"""Run one tool in its own savepoint and record it in the audit log."""
-	savepoint = "erp_mcp_tool"
-	frappe.db.savepoint(savepoint)
+	"""Run one tool and record it in the audit log.
+
+	Each HTTP request runs one tool, so on failure the whole transaction is
+	rolled back (which also drops queued after-commit jobs) before the audit
+	row is written. Frappe commits whatever is left when the request ends.
+	"""
 	started = time.monotonic()
-	status, error = "Success", None
+	status, error, traceback = "Success", None, None
 
 	try:
 		return tool.handler(**args)
 	except ToolError as e:
 		status, error = "Error", str(e)
-		frappe.db.rollback(save_point=savepoint)
 		raise
 	except frappe.PermissionError as e:
 		status, error = "Denied", _message(e) or "Permission denied."
-		frappe.db.rollback(save_point=savepoint)
 		raise ToolError(f"Permission denied: {error}") from None
 	except _SAFE_ERRORS as e:
 		status, error = "Error", _message(e) or type(e).__name__
-		frappe.db.rollback(save_point=savepoint)
 		raise ToolError(error) from None
 	except Exception as e:
 		status, error = "Error", f"{type(e).__name__}: {e}"
-		frappe.db.rollback(save_point=savepoint)
-		frappe.log_error(title=f"ERP MCP: {tool.name} failed")
+		traceback = frappe.get_traceback()
 		raise ToolError(
 			f"{tool.name} failed unexpectedly. An administrator can see the details in the Error Log."
 		) from None
 	finally:
+		if status != "Success":
+			frappe.db.rollback()
+		if traceback:
+			frappe.log_error(title=f"ERP MCP: {tool.name} failed", message=traceback)
 		frappe.clear_messages()
 		_audit(tool.name, args, status, error, started, settings)
 
@@ -114,7 +130,8 @@ def _audit(tool: str, args: dict, status: str, error: str | None, started: float
 				"user": frappe.session.user,
 				"tool": tool,
 				"status": status,
-				"arguments": _dumps(args) if settings.log_arguments else None,
+				"client": getattr(frappe.local, "erp_mcp_client", None),
+				"arguments": _dumps(_redact(args)) if settings.log_arguments else None,
 				"error": (error or "")[:1000] or None,
 				"duration_ms": int((time.monotonic() - started) * 1000),
 				"ip_address": getattr(frappe.local, "request_ip", None),
@@ -122,6 +139,42 @@ def _audit(tool: str, args: dict, status: str, error: str | None, started: float
 		).insert(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(title="ERP MCP: could not write audit log")
+
+
+def _redact(args: dict) -> dict:
+	"""Hide Password field values before they are stored in the audit log."""
+	doctype, values = args.get("doctype"), args.get("values")
+	if not isinstance(doctype, str) or not isinstance(values, dict):
+		return args
+	try:
+		meta = frappe.get_meta(doctype)
+	except Exception:
+		return args
+
+	def scrub(m, row: dict) -> dict:
+		out = {}
+		for key, value in row.items():
+			df = m.get_field(key) if isinstance(key, str) else None
+			if df and df.fieldtype == "Password":
+				value = "********"
+			elif df and df.fieldtype in ("Table", "Table MultiSelect") and isinstance(value, list):
+				child = frappe.get_meta(df.options)
+				value = [scrub(child, r) if isinstance(r, dict) else r for r in value]
+			out[key] = value
+		return out
+
+	return {**args, "values": scrub(meta, values)}
+
+
+def _is_bearer() -> bool:
+	return frappe.get_request_header("Authorization", "").lower().startswith("bearer ")
+
+
+def _oauth_client() -> str | None:
+	if not _is_bearer():
+		return None
+	token = frappe.get_request_header("Authorization", "").split(" ", 1)[1].strip()
+	return frappe.db.get_value("OAuth Bearer Token", token, "client")
 
 
 def _message(exc: Exception) -> str:
@@ -133,7 +186,10 @@ def _message(exc: Exception) -> str:
 
 
 def _dumps(value: Any) -> str:
-	return frappe.as_json(value, indent=1)
+	"""Compact JSON, keeping key order, so results use less of the model's context."""
+	from frappe.utils.response import json_handler
+
+	return json.dumps(value, default=json_handler, separators=(",", ":"), ensure_ascii=False)
 
 
 def _json(status: int, body: dict) -> Response:

@@ -13,6 +13,7 @@
   "column_break_1",
   "duration_ms",
   "ip_address",
+  "client",
   "section_break_1",
   "arguments",
   "error"
@@ -61,6 +62,13 @@
    "read_only": 1
   },
   {
+   "description": "OAuth Client ID, when the call used a bearer token.",
+   "fieldname": "client",
+   "fieldtype": "Data",
+   "label": "OAuth Client",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_break_1",
    "fieldtype": "Section Break"
   },
@@ -81,7 +89,7 @@
  "in_create": 1,
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-09-29 14:30:00.000000",
+ "modified": "2026-09-29 15:30:00.000000",
  "modified_by": "Administrator",
  "module": "ERP MCP",
  "name": "MCP Audit Log",

@@ -7,12 +7,14 @@
  "field_order": [
   "enabled",
   "endpoint",
+  "allowed_oauth_clients",
   "section_actions",
   "allow_writes",
   "allow_submit",
   "column_break_actions",
   "allow_cancel",
   "allow_delete",
+  "allow_custom_reports",
   "section_limits",
   "max_rows",
   "log_arguments",
@@ -34,6 +36,12 @@
    "label": "MCP Endpoint URL",
    "read_only": 1,
    "is_virtual": 1
+  },
+  {
+   "description": "Optional. One OAuth Client ID per line (see the OAuth Client list after Claude first connects). If set, only bearer tokens issued to these clients are accepted. Names are not trusted, since anyone can register a client with any name. API keys are not affected.",
+   "fieldname": "allowed_oauth_clients",
+   "fieldtype": "Small Text",
+   "label": "Allowed OAuth Client IDs"
   },
   {
    "fieldname": "section_actions",
@@ -73,6 +81,13 @@
    "label": "Allow Delete"
   },
   {
+   "default": "0",
+   "description": "Allow non-standard Query and Script Reports made on this site. Their SQL or code can read any table, including blocked DocTypes.",
+   "fieldname": "allow_custom_reports",
+   "fieldtype": "Check",
+   "label": "Allow Custom SQL and Script Reports"
+  },
+  {
    "fieldname": "section_limits",
    "fieldtype": "Section Break",
    "label": "Limits and Logging"
@@ -98,7 +113,7 @@
   },
   {
    "default": "User\nRole\nHas Role\nDocPerm\nCustom DocPerm\nUser Permission\nServer Script\nClient Script\nSystem Console\nScheduled Job Type\nWebhook\nEmail Account\nSocial Login Key\nConnected App\nToken Cache\nLDAP Settings\nSystem Settings\nIntegration Request\nAccess Log",
-   "description": "One DocType per line. MCP clients cannot read or change these, even as an administrator. OAuth records and MCP Settings are always blocked.",
+   "description": "One DocType per line. MCP clients cannot read or change these, or their child tables, even as an administrator. OAuth records and MCP Settings are always blocked, and DocTypes that hold code, SQL, schema or permissions are always read-only.",
    "fieldname": "blocked_doctypes",
    "fieldtype": "Small Text",
    "label": "Blocked DocTypes"
@@ -107,7 +122,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-29 14:30:00.000000",
+ "modified": "2026-09-29 15:30:00.000000",
  "modified_by": "Administrator",
  "module": "ERP MCP",
  "name": "MCP Settings",

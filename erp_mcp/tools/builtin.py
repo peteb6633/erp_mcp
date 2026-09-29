@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import frappe
-from frappe.model import default_fields, no_value_fields, table_fields
+from frappe.model import no_value_fields, table_fields
 
 from erp_mcp import guard
 from erp_mcp.tools import ToolError, mcp_tool
@@ -80,25 +80,66 @@ def _compact(value: Any) -> Any:
 	return value
 
 
-def _clean_values(values: dict, *, allow_name: bool) -> dict:
+def _clean_values(meta, values: dict, *, allow_name: bool, existing=None) -> dict:
+	"""Accept only real fields of the DocType and its child tables.
+
+	Anything else (``_action``, ``flags``, ``__islocal``) could change how Frappe
+	saves the document, so it is refused. On update, a child row's ``name`` must
+	be one of this document's own rows.
+	"""
 	if not isinstance(values, dict):
 		raise ToolError("values must be an object of field names and values.")
-	blocked = _MANAGED_KEYS | (set() if allow_name else {"name"})
-	bad = sorted(k for k in values if k in blocked)
-	if bad:
-		raise ToolError(f"These fields are managed by the system and cannot be set: {', '.join(bad)}.")
 	out = {}
 	for key, value in values.items():
-		guard.check_fieldnames([key])
-		if isinstance(value, list):
-			rows = []
-			for row in value:
-				if not isinstance(row, dict):
-					raise ToolError(f"Rows in '{key}' must be objects.")
-				rows.append({k: v for k, v in row.items() if k not in _MANAGED_KEYS})
-			value = rows
+		if key == "name":
+			if not allow_name:
+				raise ToolError("'name' cannot be changed; renaming is not supported.")
+			out[key] = value
+			continue
+		if not isinstance(key, str) or not guard.NAME_RE.match(key) or key in _MANAGED_KEYS:
+			raise ToolError(f"'{key}' cannot be set through MCP.")
+		df = meta.get_field(key)
+		if not df or (df.fieldtype in no_value_fields and df.fieldtype not in table_fields):
+			raise ToolError(f"'{key}' is not a field of {meta.name}. Use describe_doctype to see the fields.")
+		if df.fieldtype in table_fields:
+			value = _clean_rows(df, value, existing)
 		out[key] = value
 	return out
+
+
+def _clean_rows(df, rows, existing) -> list[dict]:
+	"""Check child rows. On update, a row given by ``name`` keeps its other values."""
+	if not isinstance(rows, list):
+		raise ToolError(f"'{df.fieldname}' is a child table; give a list of row objects.")
+	child_meta = frappe.get_meta(df.options)
+	own_rows = {r.name: r for r in existing.get(df.fieldname)} if existing is not None else {}
+	clean_rows = []
+	for row in rows:
+		if not isinstance(row, dict):
+			raise ToolError(f"Rows in '{df.fieldname}' must be objects.")
+		clean = {}
+		for key, value in row.items():
+			if key == "name":
+				if not isinstance(value, str) or value not in own_rows:
+					raise ToolError(
+						f"'{value}' is not a row of this document's '{df.fieldname}' table. "
+						"Leave 'name' out to add a new row."
+					)
+			elif (
+				not isinstance(key, str)
+				or not guard.NAME_RE.match(key)
+				or key in _MANAGED_KEYS
+				or not child_meta.has_field(key)
+			):
+				raise ToolError(f"'{key}' is not a field of {df.options}.")
+			clean[key] = value
+		if "name" in clean:
+			current = own_rows[clean["name"]]
+			merged = {f: current.get(f) for f in child_meta.get_valid_columns() if f not in _MANAGED_KEYS}
+			merged.update(clean)
+			clean = merged
+		clean_rows.append(clean)
+	return clean_rows
 
 
 def _summary(doc) -> dict:
@@ -110,19 +151,21 @@ def _summary(doc) -> dict:
 	return out
 
 
-def _describe_fields(meta, readable_levels: set[int] | None) -> list[dict]:
+def _describe_fields(meta, readable_levels: set[int] | None, include_read_only: bool) -> list[dict]:
 	fields = []
 	for df in meta.fields:
 		if df.fieldtype in no_value_fields and df.fieldtype not in table_fields:
 			continue
 		if df.hidden and not df.reqd:
 			continue
+		if df.read_only and not include_read_only:
+			continue
 		if readable_levels is not None and (df.permlevel or 0) not in readable_levels:
 			continue
 		item = {"fieldname": df.fieldname, "label": df.label, "fieldtype": df.fieldtype}
 		for key in ("options", "reqd", "read_only", "default", "allow_on_submit"):
 			value = df.get(key)
-			if value not in (None, "", 0):
+			if value not in (None, "", 0, "0"):
 				item[key] = value
 		fields.append(item)
 	return fields
@@ -143,11 +186,10 @@ def _describe_fields(meta, readable_levels: set[int] | None) -> list[dict]:
 )
 def whoami() -> dict:
 	user = frappe.session.user
-	companies = (
-		frappe.get_list("Company", pluck="name", limit_page_length=50)
-		if frappe.db.exists("DocType", "Company")
-		else []
-	)
+	try:
+		companies = frappe.get_list("Company", pluck="name", limit_page_length=50)
+	except (frappe.PermissionError, frappe.DoesNotExistError):
+		companies = []
 	return {
 		"user": user,
 		"full_name": frappe.utils.get_fullname(user),
@@ -166,13 +208,23 @@ def whoami() -> dict:
 	description=(
 		"List the fields of a DocType (a record type such as 'Customer' or 'Sales Invoice'), including "
 		"child tables, which fields are required, and what the connected user may do with it. "
-		"Call this before creating or updating documents."
+		"Call this before creating or updating documents. Read-only (calculated) fields are left out "
+		"unless include_read_only is true."
 	),
-	input_schema=_obj({"doctype": _DOCTYPE}, ["doctype"]),
+	input_schema=_obj(
+		{
+			"doctype": _DOCTYPE,
+			"include_read_only": {
+				"type": "boolean",
+				"description": "Also list read-only fields such as totals. Default false.",
+			},
+		},
+		["doctype"],
+	),
 	read_only=True,
 	idempotent=True,
 )
-def describe_doctype(doctype: str) -> dict:
+def describe_doctype(doctype: str, include_read_only: bool = False) -> dict:
 	settings = _settings()
 	guard.check_doctype(doctype, settings)
 	if not frappe.has_permission(doctype, "read"):
@@ -187,7 +239,7 @@ def describe_doctype(doctype: str) -> dict:
 		child_meta = frappe.get_meta(df.options)
 		child_tables[df.fieldname] = {
 			"doctype": df.options,
-			"fields": _describe_fields(child_meta, None),
+			"fields": _describe_fields(child_meta, None, include_read_only),
 		}
 
 	return {
@@ -202,7 +254,7 @@ def describe_doctype(doctype: str) -> dict:
 			p: bool(frappe.has_permission(doctype, p))
 			for p in ("read", "write", "create", "submit", "cancel", "delete", "report")
 		},
-		"fields": _describe_fields(meta, levels),
+		"fields": _describe_fields(meta, levels, include_read_only),
 		"child_tables": child_tables,
 	}
 
@@ -267,6 +319,7 @@ def list_documents(
 			fields.append("docstatus")
 		fields.append("modified")
 	guard.check_order_by(order_by)
+	guard.check_filters(filters, doctype, settings)
 
 	limit = guard.clamp_limit(limit, settings)
 	start = max(0, int(start or 0))
@@ -275,8 +328,8 @@ def list_documents(
 		fields=fields,
 		filters=filters,
 		order_by=order_by or "modified desc",
-		limit_start=start,
-		limit_page_length=limit + 1,
+		offset=start,
+		limit=limit + 1,
 	)
 	return {
 		"doctype": doctype,
@@ -308,9 +361,10 @@ def search_documents(doctype: str, text: str, limit: int | None = None) -> dict:
 	guard.check_doctype(doctype, settings)
 	meta = frappe.get_meta(doctype)
 
+	permitted = set(meta.get_permitted_fieldnames())
 	search_fields = ["name"]
 	for f in [meta.get_title_field(), *(meta.get_search_fields() or [])]:
-		if f and f not in search_fields and (f in default_fields or meta.has_field(f)):
+		if f and f not in search_fields and f in permitted:
 			search_fields.append(f)
 
 	pattern = f"%{text.strip()}%"
@@ -319,9 +373,9 @@ def search_documents(doctype: str, text: str, limit: int | None = None) -> dict:
 		fields=search_fields,
 		or_filters=[[f, "like", pattern] for f in search_fields],
 		order_by="modified desc",
-		limit_page_length=guard.clamp_limit(limit, settings, default=10),
+		limit=guard.clamp_limit(limit, settings, default=10),
 	)
-	return {"doctype": doctype, "rows": rows}
+	return {"doctype": doctype, "rows": _compact(rows)}
 
 
 @mcp_tool(
@@ -360,9 +414,10 @@ def get_document(doctype: str, name: str) -> dict:
 )
 def create_document(doctype: str, values: dict) -> dict:
 	guard.check_doctype(doctype, _settings(), write=True)
-	values = _clean_values(values, allow_name=True)
+	values = _clean_values(frappe.get_meta(doctype), values, allow_name=True)
 	doc = frappe.get_doc({"doctype": doctype, **values})
 	doc.insert()
+	doc.apply_fieldlevel_read_permissions()
 	return {"created": _summary(doc), "document": _compact(doc.as_dict())}
 
 
@@ -370,8 +425,9 @@ def create_document(doctype: str, values: dict) -> dict:
 	title="Update document",
 	description=(
 		"Change fields on an existing document. Only the fields given are changed. Giving a child table "
-		"(a list) replaces all its rows, so include every row you want to keep; include each row's "
-		"'name' to keep that row. Submitted documents only accept fields marked allow_on_submit."
+		"(a list) replaces its rows: rows left out are removed. To keep or change an existing row, include "
+		"its 'name' plus only the fields you are changing; rows without 'name' are added. Submitted "
+		"documents only accept fields marked allow_on_submit."
 	),
 	input_schema=_obj(
 		{
@@ -386,12 +442,13 @@ def create_document(doctype: str, values: dict) -> dict:
 )
 def update_document(doctype: str, name: str, values: dict) -> dict:
 	guard.check_doctype(doctype, _settings(), write=True)
-	values = _clean_values(values, allow_name=False)
 	if not values:
 		raise ToolError("values is empty; nothing to change.")
 	doc = frappe.get_doc(doctype, name)
+	values = _clean_values(doc.meta, values, allow_name=False, existing=doc)
 	doc.update(values)
 	doc.save()
+	doc.apply_fieldlevel_read_permissions()
 	return {"updated": _summary(doc), "document": _compact(doc.as_dict())}
 
 
@@ -413,6 +470,7 @@ def submit_document(doctype: str, name: str) -> dict:
 	if doc.docstatus != 0:
 		raise ToolError(f"{doctype} {name} is not a draft (docstatus {doc.docstatus}).")
 	doc.submit()
+	doc.apply_fieldlevel_read_permissions()
 	return {"submitted": _summary(doc)}
 
 
@@ -429,6 +487,7 @@ def cancel_document(doctype: str, name: str) -> dict:
 	if doc.docstatus != 1:
 		raise ToolError(f"{doctype} {name} is not submitted (docstatus {doc.docstatus}).")
 	doc.cancel()
+	doc.apply_fieldlevel_read_permissions()
 	return {"cancelled": _summary(doc)}
 
 
@@ -441,6 +500,8 @@ def cancel_document(doctype: str, name: str) -> dict:
 )
 def delete_document(doctype: str, name: str) -> dict:
 	guard.check_doctype(doctype, _settings(), write=True)
+	if not frappe.db.exists(doctype, name):
+		raise ToolError(f"{doctype} {name} does not exist.")
 	frappe.delete_doc(doctype, name)
 	return {"deleted": {"doctype": doctype, "name": name}}
 
@@ -464,30 +525,56 @@ def delete_document(doctype: str, name: str) -> dict:
 	idempotent=True,
 )
 def list_reports(doctype: str | None = None, text: str | None = None) -> dict:
+	settings = _settings()
 	filters: dict[str, Any] = {"disabled": 0}
 	if doctype:
 		filters["ref_doctype"] = doctype
 	if text:
 		filters["name"] = ["like", f"%{text}%"]
 
-	blocked = guard.blocked_doctypes(_settings())
-	allowed: dict[str, bool] = {}
+	# Reports restricted to roles: keep those that share a role with the user.
+	user_roles = set(frappe.get_roles())
+	report_roles: dict[str, set[str]] = {}
+	for row in frappe.get_all("Has Role", filters={"parenttype": "Report"}, fields=["parent", "role"]):
+		report_roles.setdefault(row.parent, set()).add(row.role)
+
+	can_report: dict[str, bool] = {}
 	reports = []
 	for r in frappe.get_all(
 		"Report",
 		filters=filters,
-		fields=["name", "ref_doctype", "report_type", "module"],
+		fields=["name", "ref_doctype", "report_type", "is_standard", "module"],
 		order_by="name asc",
-		limit_page_length=500,
+		limit=500,
 	):
-		ref = r.ref_doctype
-		if ref in blocked:
+		if not _report_allowed(r, settings):
 			continue
-		if ref not in allowed:
-			allowed[ref] = bool(frappe.has_permission(ref, "report"))
-		if allowed[ref]:
-			reports.append(r)
+		if r.report_type == "Custom Report" and not _report_allowed(_source_report(r.name), settings):
+			continue
+		roles = report_roles.get(r.name)
+		if roles and not roles & user_roles:
+			continue
+		if r.ref_doctype not in can_report:
+			can_report[r.ref_doctype] = bool(frappe.has_permission(r.ref_doctype, "report"))
+		if can_report[r.ref_doctype]:
+			reports.append({k: r[k] for k in ("name", "ref_doctype", "report_type", "module")})
 	return {"reports": reports}
+
+
+def _source_report(report_name: str):
+	"""The report a Custom Report is built on (itself for other types)."""
+	from frappe.desk.query_report import get_reference_report
+
+	return get_reference_report(frappe.get_doc("Report", report_name))
+
+
+def _report_allowed(report, settings) -> bool:
+	"""Standard reports only, unless the site allows custom SQL and script reports."""
+	if not report.ref_doctype or guard.is_blocked(report.ref_doctype, settings):
+		return False
+	if report.report_type in ("Query Report", "Script Report") and report.is_standard != "Yes":
+		return bool(settings.allow_custom_reports)
+	return True
 
 
 def _normalise_columns(columns: list) -> list[dict]:
@@ -531,12 +618,15 @@ def _normalise_columns(columns: list) -> list[dict]:
 )
 def run_report(report_name: str, filters: dict | None = None, limit: int | None = None) -> dict:
 	settings = _settings()
-	ref = frappe.db.get_value("Report", report_name, "ref_doctype")
-	if not ref:
+	if not frappe.db.exists("Report", report_name):
 		raise ToolError(f"No report called '{report_name}'. Use list_reports to find the exact name.")
-	guard.check_doctype(ref, settings)
 
 	from frappe.desk.query_report import run
+
+	# A Custom Report runs the report it is based on, so check both.
+	for r in (frappe.get_doc("Report", report_name), _source_report(report_name)):
+		if not _report_allowed(r, settings):
+			raise ToolError(f"The report '{r.name}' is not available through MCP on this site.")
 
 	data = run(report_name, filters=filters or {}, ignore_prepared_report=True)
 	columns = _normalise_columns(data.get("columns"))

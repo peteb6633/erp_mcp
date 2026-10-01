@@ -77,6 +77,8 @@ WRITE_BLOCKED = frozenset(
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 ORDER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\s+(asc|desc))?$", re.IGNORECASE)
 
+# Keep in step with the field defaults in mcp_settings.json; submit and cancel
+# are off by Pete's choice. See docs/decisions/2026-10-01-submit-cancel-off-by-default.md.
 DEFAULTS = frappe._dict(
 	enabled=1,
 	allow_writes=1,
@@ -124,6 +126,7 @@ def is_blocked(doctype: str, settings: frappe._dict) -> bool:
 
 def _parents_of(doctype: str) -> set[str]:
 	"""DocTypes that hold this one as a child table. Cached for the request."""
+	# Not frappe.local.__dict__: that failed on a live site. See docs/decisions/2026-09-30-erp-mcp-v0.1.md (Traps).
 	cache = getattr(frappe.local, "erp_mcp_parents", None)
 	if cache is None:
 		cache = frappe.local.erp_mcp_parents = {}

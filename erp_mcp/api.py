@@ -54,6 +54,7 @@ def mcp():
 	# Authorization header it sets the session ID to the user's name; a browser
 	# session (sid cookie or ?sid=) keeps a random ID. Refuse the latter, since a
 	# failed header check would otherwise fall back to the browser session.
+	# DELIBERATE, not a typo: see docs/decisions/2026-09-30-erp-mcp-v0.1.md (Traps), tests/test_traps.py.
 	from_browser_session = frappe.session.sid != frappe.session.user
 	if (
 		from_browser_session
@@ -109,11 +110,13 @@ def _invoke(tool: Tool, args: dict, settings: frappe._dict) -> Any:
 		raise ToolError(error) from None
 	except Exception as e:
 		status, error = "Error", f"{type(e).__name__}: {e}"
+		# Capture here: by `finally` the ToolError has replaced it. See docs/decisions/2026-09-30-erp-mcp-v0.1.md (Traps).
 		traceback = frappe.get_traceback()
 		raise ToolError(
 			f"{tool.name} failed unexpectedly. An administrator can see the details in the Error Log."
 		) from None
 	finally:
+		# Order matters: rollback, then Error Log, then audit row. See docs/decisions/2026-09-30-erp-mcp-v0.1.md (Traps).
 		if status != "Success":
 			frappe.db.rollback()
 		if traceback:
@@ -199,6 +202,7 @@ def _json(status: int, body: dict) -> Response:
 def _unauthorised() -> Response:
 	from frappe.integrations.oauth2 import get_resource_url
 
+	# Must match Frappe's discovery documents, not the request host. See docs/decisions/2026-09-30-erp-mcp-v0.1.md (Traps).
 	host = get_resource_url()
 	return Response(
 		json.dumps({"error": "unauthorized", "error_description": "Send an OAuth bearer token."}),

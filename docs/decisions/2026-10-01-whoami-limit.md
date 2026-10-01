@@ -32,4 +32,4 @@ This corrects the 0.1 note, which said the old names "silently misbehaved" in v1
 
 ## Gaps and open questions
 
-- Other gap from the 0.1 note still open: MCP Settings ship with Allow Submit and Allow Cancel on, while Pete chose read plus draft writes.
+- The submit and cancel defaults gap from the 0.1 note is fixed in [2026-10-01-submit-cancel-off-by-default.md](2026-10-01-submit-cancel-off-by-default.md).

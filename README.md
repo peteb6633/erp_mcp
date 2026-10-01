@@ -15,8 +15,8 @@ Licence: MIT. Needs Frappe and ERPNext v16.
 | `get_document` | One record with its child rows | always on |
 | `list_reports` / `run_report` | Find and run the site's standard reports | always on (custom SQL and script reports need Allow Custom SQL and Script Reports) |
 | `create_document` / `update_document` | Drafts and edits | Allow Create and Update |
-| `submit_document` | Post a draft to the ledger | Allow Submit |
-| `cancel_document` | Reverse a submitted document | Allow Cancel |
+| `submit_document` | Post a draft to the ledger | Allow Submit (off by default) |
+| `cancel_document` | Reverse a submitted document | Allow Cancel (off by default) |
 | `delete_document` | Delete a draft or cancelled record | Allow Delete (off by default) |
 
 There is no tool that runs arbitrary Python or SQL.
@@ -50,7 +50,7 @@ On Frappe Cloud, add the repo as a custom app on a private bench, then install i
 
 1. Create an ERPNext user for the connection and give it only the roles it needs, such as Accounts User.
 2. Open **MCP Settings** in the desk. Check the allowed actions. If the site's OAuth discovery is off, click **Enable OAuth for MCP clients**. (It is on by default in Frappe v16.)
-   Before connecting Claude to real data, untick **Allow Submit** and **Allow Cancel** until you are happy with what it does on drafts.
+   **Allow Submit** and **Allow Cancel** are off by default, so Claude can read and make drafts but not post to the ledger. Tick them only once you are happy with what it does on drafts. Sites that installed version 0.1 before this change keep whatever is saved in MCP Settings; check those two boxes by hand.
 3. Copy the **MCP Endpoint URL**. It looks like `https://<site>/api/method/erp_mcp.api.mcp`.
 4. In Claude, go to **Settings → Connectors → Add custom connector**, paste the URL, then connect. Claude registers itself with the site, and you sign in as the user from step 1.
 5. Optional: open **OAuth Client**, find the client Claude registered, and paste its ID into **Allowed OAuth Client IDs** in MCP Settings.

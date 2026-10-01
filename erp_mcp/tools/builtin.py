@@ -187,7 +187,7 @@ def _describe_fields(meta, readable_levels: set[int] | None, include_read_only: 
 def whoami() -> dict:
 	user = frappe.session.user
 	try:
-		companies = frappe.get_list("Company", pluck="name", limit_page_length=50)
+		companies = frappe.get_list("Company", pluck="name", limit=50)
 	except (frappe.PermissionError, frappe.DoesNotExistError):
 		companies = []
 	return {

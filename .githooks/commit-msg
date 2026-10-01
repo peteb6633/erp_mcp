@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Git commit-msg hook: the same rule for commits made outside Claude Code
+# (by hand, by Copilot, by any other tool). Installed per repo with
+#   git config core.hooksPath .githooks
+# or for every repo on a machine by install.sh --global.
+root=$(git rev-parse --show-toplevel) || exit 0
+check="$root/scripts/decision-check.sh"
+[[ -x "$check" ]] || exit 0          # repo has not adopted decision notes
+DECISION_MSG_FILE="$1" exec "$check" staged

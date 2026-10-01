@@ -1,0 +1,8 @@
+# Files that never need a decision note. One glob per line; * also matches /.
+# Everything else counts as code. Keep this list short: a change to CI, config
+# or dependencies is usually a decision.
+docs/*
+*.md
+LICENSE*
+license.txt
+.gitignore

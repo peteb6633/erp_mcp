@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git *)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/require-decision-note.sh",
+            "args": [],
+            "statusMessage": "Checking for a decision note"
+          }
+        ]
+      }
+    ]
+  }
+}

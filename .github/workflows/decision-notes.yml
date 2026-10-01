@@ -1,0 +1,52 @@
+name: Decision notes
+
+# Backstop for the local hooks: every pushed commit that changes code must carry
+# a decision note in docs/decisions/, or say "Decision-Note: none - <reason>".
+# Pull requests are judged as a whole, so one note can cover a run of commits.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check decision notes
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/decision-check.sh
+          if [ "$EVENT" = "pull_request" ]; then
+            base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+            scripts/decision-check.sh range "$base" "$PR_HEAD"
+            exit 0
+          fi
+          # Push: check each new commit on its own. A new branch has no "before",
+          # so check the commits not already on another branch.
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            commits=$(git rev-list --reverse "$AFTER" --not $(git for-each-ref --format='%(objectname)' refs/remotes/origin | grep -v "^$AFTER$") 2>/dev/null || git rev-list --reverse "$AFTER")
+          else
+            commits=$(git rev-list --reverse "$BEFORE..$AFTER")
+          fi
+          failed=0
+          for c in $commits; do
+            # Commits from before the repo adopted decision notes are not judged.
+            git cat-file -e "$c:scripts/decision-check.sh" 2>/dev/null || { echo "skip $(git log -1 --format=%h "$c") (before adoption)"; continue; }
+            echo "::group::$(git log -1 --format='%h %s' "$c")"
+            scripts/decision-check.sh commit "$c" || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed

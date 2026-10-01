@@ -24,6 +24,8 @@ packages = []
 
 [tool.ruff]
 line-length = 110
+# py311 on purpose: py314 rewrites `except (A, B):` into syntax older Python rejects.
+# See docs/decisions/2026-09-30-erp-mcp-v0.1.md (Traps).
 target-version = "py311"
 
 [tool.ruff.lint]

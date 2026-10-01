@@ -187,6 +187,7 @@ def _describe_fields(meta, readable_levels: set[int] | None, include_read_only: 
 def whoami() -> dict:
 	user = frappe.session.user
 	try:
+		# limit/offset, not the deprecated limit_page_length/limit_start. See docs/decisions/2026-10-01-whoami-limit.md.
 		companies = frappe.get_list("Company", pluck="name", limit=50)
 	except (frappe.PermissionError, frappe.DoesNotExistError):
 		companies = []
@@ -328,6 +329,7 @@ def list_documents(
 		fields=fields,
 		filters=filters,
 		order_by=order_by or "modified desc",
+		# limit/offset, not the deprecated limit_start/limit_page_length. See docs/decisions/2026-10-01-whoami-limit.md.
 		offset=start,
 		limit=limit + 1,
 	)
